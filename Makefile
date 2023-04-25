@@ -1,5 +1,5 @@
 CFLAGS += -Wall -Wextra -std=c11 -D_DEFAULT_SOURCE
-LDLIBS += -lmpsse
+LDLIBS += -lwiringPi
 
 all: oz890
 

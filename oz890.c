@@ -1,14 +1,15 @@
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
-#include <mpsse.h>
-#include <assert.h>
+#include <stdint.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <unistd.h>
 #include <string.h>
 #include <error.h>
 #include <errno.h>
 #include <endian.h>
+#include <wiringPiI2C.h>
 
 #define PWD_FAIL	(1 << 7)
 #define PWD_OK		(1 << 6)
@@ -27,6 +28,7 @@
 
 #define IDL_BLD_ENB	(1 << 6)
 
+int i2c_fd;
 struct mpsse_context *ftdi = NULL;
 uint8_t address = 0x60;
 
@@ -35,31 +37,12 @@ char *eeprom_in = NULL;
 
 uint8_t read_register(uint8_t reg)
 {
-	uint8_t *data = NULL;
-	uint8_t rv;
-	uint8_t addr_reading = address | 1;
+	uint8_t rv = 0;
 
-	Start(ftdi);
-	Write(ftdi, (char *)&address, 1);
-	Write(ftdi, (char *)&reg, 1);
-
-	if(GetAck(ftdi) == ACK) {
-		Start(ftdi);
-		Write(ftdi, (char *)&addr_reading, 1);
-
-		if(GetAck(ftdi) == ACK) {
-			data = (uint8_t *)Read(ftdi, 1);
-			if(data) {
-				rv = *data;
-				free(data);
-			}
-			SendNacks(ftdi);
-			/* Read in one dummy byte, with a NACK */
-			Read(ftdi, 1);
-			}
+	if(write(i2c_fd, (char *)&reg, 1) == 1){
+		read(i2c_fd, &rv, 1);
 	}
 
-	Stop(ftdi);
 	if (debug_level >= 2) {
 		printf("Register 0x%x read 0x%x\n", reg, rv);
 	}
@@ -71,12 +54,9 @@ void write_register(uint8_t reg, uint8_t data)
 	if (debug_level >= 2) {
 		printf("Writing 0x%x to register 0x%x\n", data, reg);
 	}
-	Start(ftdi);
-	Write(ftdi, (char *)&address, 1);
-	Write(ftdi, (char *)&reg, 1);
-	Write(ftdi, (char *)&data, 1);
 
-	Stop(ftdi);
+	uint8_t buf[2] = {reg, data};
+	write(i2c_fd, buf, sizeof(buf));
 }
 
 bool is_eeprom_busy(void)
@@ -377,10 +357,11 @@ int main(int argc, char *argv[])
 	}
 
 	if (!eeprom_in) {
-		if((ftdi = MPSSE(I2C, FOUR_HUNDRED_KHZ, MSB)) != NULL && ftdi->open)
+		i2c_fd = wiringPiI2CSetup(address);
+		if(i2c_fd >= 0)
 		{
 			if (debug_level >= 1)
-				printf("%s initialized at %dHz (I2C)\n", GetDescription(ftdi), GetClock(ftdi));
+				printf("initialized I2C\n");
 			uint8_t chip_id = read_register(0);
 			if (chip_id != 2) {
 				fprintf(stderr, "Unknown chip: %x\n", chip_id);
@@ -408,7 +389,7 @@ int main(int argc, char *argv[])
 			putchar('\n');
 			printf("Version: %d\n", tmp[1]);
 		} else {
-			fprintf(stderr, "Failed to initialize MPSSE: %s\n", ErrorString(ftdi));
+			fprintf(stderr, "Failed to initialize I2C: %s\n", strerror(errno));
 			return -1;
 		}
 	}
@@ -611,7 +592,6 @@ int main(int argc, char *argv[])
 	}
 
 out:
-	Close(ftdi);
-
+	close(i2c_fd);
 	return retval;
 }
